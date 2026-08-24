@@ -1,0 +1,6 @@
+# Local per-machine Claude Code settings (personal permissions, not for sharing)
+.claude/settings.local.json
+
+# Runtime data / real config, should never be tracked
+config/sites.conf
+state.json

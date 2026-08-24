@@ -1,0 +1,12 @@
+/* Append to ~/.config/waybar/style.css */
+
+#custom-ssl-watcher {
+  margin: 0 7.5px;
+  min-width: 12px;
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+
+#custom-ssl-watcher.empty {
+  opacity: 0.4;
+}

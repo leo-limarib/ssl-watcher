@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# Refresh SSL expiry data for sites listed in ~/.config/ssl-watcher/sites.conf.
+# Skips work if the previous run was less than $INTERVAL_SECONDS ago (default 24h).
+# Pass --force to override the throttle.
+
+set -uo pipefail
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/ssl-watcher"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/ssl-watcher"
+SITES_FILE="$CONFIG_DIR/sites.conf"
+STATE_FILE="$STATE_DIR/state.json"
+INTERVAL_SECONDS="${SSL_WATCHER_INTERVAL:-86400}"
+CONNECT_TIMEOUT="${SSL_WATCHER_TIMEOUT:-10}"
+FORCE=0
+
+for arg in "$@"; do
+  case "$arg" in
+    --force|-f) FORCE=1 ;;
+    --help|-h)
+      cat <<EOF
+Usage: ssl-watcher-check [--force]
+
+Reads sites from: $SITES_FILE
+Writes state to:  $STATE_FILE
+
+Site file format (one per line):
+  host[:port] [# Friendly label]
+  # Lines starting with '#' are comments.
+
+Env vars:
+  SSL_WATCHER_INTERVAL  seconds between real checks (default 86400)
+  SSL_WATCHER_TIMEOUT   per-site openssl connect timeout (default 10)
+EOF
+      exit 0
+      ;;
+  esac
+done
+
+mkdir -p "$STATE_DIR"
+
+if [[ ! -f "$SITES_FILE" ]]; then
+  jq -nc --arg msg "sites file not found: $SITES_FILE" \
+    '{last_check:0, error:$msg, sites:[]}' > "$STATE_FILE"
+  echo "ssl-watcher: no sites file at $SITES_FILE" >&2
+  exit 0
+fi
+
+now=$(date +%s)
+
+if [[ $FORCE -eq 0 && -f "$STATE_FILE" ]]; then
+  last_check=$(jq -r '.last_check // 0' "$STATE_FILE" 2>/dev/null || echo 0)
+  age=$(( now - last_check ))
+  if (( age < INTERVAL_SECONDS )); then
+    echo "ssl-watcher: skip — last check ${age}s ago (< ${INTERVAL_SECONDS}s)" >&2
+    exit 0
+  fi
+fi
+
+trim() {
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "$s"
+}
+
+results='[]'
+while IFS= read -r line || [[ -n "$line" ]]; do
+  # Skip blank lines and full-line comments
+  [[ -z "$(trim "$line")" ]] && continue
+  [[ "$(trim "$line")" =~ ^# ]] && continue
+
+  if [[ "$line" == *"#"* ]]; then
+    target="$(trim "${line%%#*}")"
+    label="$(trim "${line#*#}")"
+  else
+    target="$(trim "$line")"
+    label=""
+  fi
+  [[ -z "$target" ]] && continue
+
+  host="${target%%:*}"
+  if [[ "$target" == *:* ]]; then
+    port="${target##*:}"
+  else
+    port=443
+  fi
+  [[ -z "$label" ]] && label="$host"
+
+  # Validate port is numeric
+  if ! [[ "$port" =~ ^[0-9]+$ ]]; then
+    entry=$(jq -nc --arg h "$host" --arg l "$label" \
+      '{host:$h, port:0, label:$l, days:null, expires:null, error:"invalid port"}')
+    results=$(jq -c --argjson e "$entry" '. + [$e]' <<< "$results")
+    continue
+  fi
+
+  end_date=$(echo | timeout "$CONNECT_TIMEOUT" \
+    openssl s_client -connect "$host:$port" -servername "$host" 2>/dev/null \
+    | openssl x509 -noout -enddate 2>/dev/null \
+    | sed 's/^notAfter=//')
+
+  if [[ -z "$end_date" ]]; then
+    entry=$(jq -nc --arg h "$host" --argjson p "$port" --arg l "$label" \
+      '{host:$h, port:$p, label:$l, days:null, expires:null, error:"connection or cert read failed"}')
+  else
+    end_epoch=$(date -d "$end_date" +%s 2>/dev/null || echo 0)
+    if (( end_epoch == 0 )); then
+      entry=$(jq -nc --arg h "$host" --argjson p "$port" --arg l "$label" --arg e "$end_date" \
+        '{host:$h, port:$p, label:$l, days:null, expires:$e, error:"failed to parse expiry date"}')
+    else
+      days=$(( (end_epoch - now) / 86400 ))
+      entry=$(jq -nc --arg h "$host" --argjson p "$port" --arg l "$label" --arg e "$end_date" --argjson d "$days" \
+        '{host:$h, port:$p, label:$l, days:$d, expires:$e, error:null}')
+    fi
+  fi
+  results=$(jq -c --argjson e "$entry" '. + [$e]' <<< "$results")
+done < "$SITES_FILE"
+
+tmp="$STATE_FILE.tmp.$$"
+jq -nc --argjson now "$now" --argjson sites "$results" \
+  '{last_check:$now, error:null, sites:$sites}' > "$tmp"
+mv "$tmp" "$STATE_FILE"
+
+# Notify waybar to re-read (signal 8 -> SIGRTMIN+8). Harmless if not running.
+if command -v pkill >/dev/null 2>&1; then
+  pkill -SIGRTMIN+8 waybar 2>/dev/null || true
+fi
+
+echo "ssl-watcher: refreshed $(jq '.sites | length' "$STATE_FILE") site(s)" >&2

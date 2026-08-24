@@ -1,0 +1,12 @@
+# ssl-watcher sites
+# One website per line. Format:
+#   host[:port] [# Friendly label]
+#
+# Lines starting with '#' and blank lines are ignored.
+# Default port is 443.
+#
+# Examples:
+# example.com
+# api.example.com:443 # Production API
+# staging.example.com # Staging
+# old-windows-box.example.com:8443 # IIS box

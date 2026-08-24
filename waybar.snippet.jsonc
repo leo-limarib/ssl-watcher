@@ -1,0 +1,27 @@
+// Add this module to ~/.config/waybar/config.jsonc.
+//
+// 1. Reference "custom/ssl-watcher" inside one of "modules-left" /
+//    "modules-center" / "modules-right". Example for the right side:
+//
+//      "modules-right": [
+//        "custom/ssl-watcher",
+//        "group/tray-expander",
+//        "bluetooth",
+//        "network",
+//        "pulseaudio",
+//        "cpu",
+//        "battery"
+//      ],
+//
+// 2. Add the module definition below alongside your other "custom/*" entries.
+//    Then run:  omarchy restart waybar
+
+"custom/ssl-watcher": {
+  "exec": "ssl-watcher-bar",
+  "return-type": "json",
+  "interval": 300,
+  "signal": 8,
+  "format": "{}",
+  "tooltip": true,
+  "on-click": "ssl-watcher-check --force"
+}

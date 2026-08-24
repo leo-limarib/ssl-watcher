@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Emit waybar custom-module JSON: one colored circle per site + tooltip with
+# per-site days-to-expiry.
+
+set -uo pipefail
+
+STATE_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/ssl-watcher/state.json"
+WARN_DAYS="${SSL_WATCHER_WARN_DAYS:-14}"
+COLOR_OK="${SSL_WATCHER_COLOR_OK:-#a6e3a1}"
+COLOR_WARN="${SSL_WATCHER_COLOR_WARN:-#f38ba8}"
+COLOR_UNKNOWN="${SSL_WATCHER_COLOR_UNKNOWN:-#6c7086}"
+
+if [[ ! -f "$STATE_FILE" ]]; then
+  jq -nc --arg t "SSL watcher: no data yet — run ssl-watcher-check --force" \
+    '{text:"", tooltip:$t, class:"empty"}'
+  exit 0
+fi
+
+jq -c \
+  --argjson warn "$WARN_DAYS" \
+  --arg ok "$COLOR_OK" \
+  --arg bad "$COLOR_WARN" \
+  --arg unk "$COLOR_UNKNOWN" '
+  def color(s):
+    if s.error != null then $bad
+    elif s.days == null then $unk
+    elif s.days < 0 then $bad
+    elif s.days < $warn then $bad
+    else $ok end;
+
+  def line(s):
+    (s.label // s.host) as $lbl |
+    if s.error != null then "  ✗ \($lbl): \(s.error)"
+    elif s.days == null then "  ? \($lbl): unknown"
+    elif s.days < 0 then "  ✗ \($lbl): EXPIRED \(-s.days)d ago"
+    elif s.days < $warn then "  ! \($lbl): \(s.days)d left (expires \(s.expires))"
+    else "  ✓ \($lbl): \(s.days)d left (expires \(s.expires))" end;
+
+  def header:
+    ((.last_check // 0) as $t |
+     if $t == 0 then "SSL expiry — last check: never"
+     else "SSL expiry — last check: " + ($t | localtime | strftime("%Y-%m-%d %H:%M")) end);
+
+  if (.sites | length) == 0 then
+    {text:"", tooltip:(header + "\n(no sites configured)"), class:"empty"}
+  else
+    {
+      text:    ([.sites[] | "<span color=\"\(color(.))\">●</span>"] | join(" ")),
+      tooltip: (header + "\n" + ([.sites[] | line(.)] | join("\n"))),
+      class:   (if any(.sites[]; .error != null
+                        or (.days != null and .days < $warn))
+                then "warn" else "ok" end)
+    }
+  end
+' "$STATE_FILE"
