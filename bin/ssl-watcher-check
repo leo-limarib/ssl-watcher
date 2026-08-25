@@ -121,7 +121,11 @@ jq -nc --argjson now "$now" --argjson sites "$results" \
   '{last_check:$now, error:null, sites:$sites}' > "$tmp"
 mv "$tmp" "$STATE_FILE"
 
-# Notify waybar to re-read (signal 8 -> SIGRTMIN+8). Harmless if not running.
+# Nudge whichever bar is showing us to repaint. Both are harmless no-ops when
+# that bar is not running.
+if command -v omarchy-shell >/dev/null 2>&1; then
+  omarchy-shell -q ssl-watcher refresh >/dev/null 2>&1 || true
+fi
 if command -v pkill >/dev/null 2>&1; then
   pkill -SIGRTMIN+8 waybar 2>/dev/null || true
 fi

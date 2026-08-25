@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "local.ssl-watcher",
+  "name": "SSL watcher",
+  "version": "1.0.0",
+  "author": "ssl-watcher",
+  "description": "Certificate expiry indicator for the sites in ssl-watcher/sites.conf",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "SSL watcher",
+    "description": "Lock icon that turns yellow when a certificate is expiring and red when one has expired or is unreachable",
+    "category": "System",
+    "defaultSection": "right",
+    "allowMultiple": false
+  }
+}
